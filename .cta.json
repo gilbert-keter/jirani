@@ -1,0 +1,22 @@
+{
+  "projectName": "jirani",
+  "mode": "code-router",
+  "typescript": true,
+  "tailwind": true,
+  "packageManager": "npm",
+  "addOnOptions": {},
+  "git": true,
+  "version": 1,
+  "framework": "react-cra",
+  "chosenAddOns": [
+    "eslint",
+    "form",
+    "tanstack-query",
+    "t3env",
+    "store",
+    "module-federation",
+    "shadcn",
+    "table",
+    "compiler"
+  ]
+}
