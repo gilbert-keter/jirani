@@ -1,0 +1,413 @@
+flowchart TB
+    Start([USER ARRIVES AT PLATFORM])
+    
+    %% Registration Section
+    Start --> Role{Choose Role}
+    Role -->|Customer| RegC[Registration]
+    Role -->|Provider| RegP[Registration]
+    Role -->|Both| RegB[Registration]
+    RegC & RegP & RegB --> Verify[Email & Phone Verification]
+    Verify --> Active[Account Activated]
+    
+    %% Split into two main paths
+    Active --> CustDash[Customer Dashboard]
+    Active --> ProvDash[Provider Dashboard]
+    
+    %% ============ PROVIDER SIDE (LEFT COLUMN) ============
+    
+    %% Token Purchase Flow
+    ProvDash --> TokenCheck{Check Token Balance}
+    TokenCheck -->|Low < 3| BuyToken[Buy Tokens]
+    BuyToken --> SelectPkg[Select Package<br/>5/10/20 tokens]
+    SelectPkg --> TokenPayment{Payment Method}
+    TokenPayment -->|Stripe| TokCard[Card]
+    TokenPayment -->|M-Pesa| TokMpesa[M-Pesa]
+    TokenPayment -->|Bank| TokBank[Bank]
+    TokCard & TokMpesa & TokBank --> TokProcess[Process Payment]
+    TokProcess --> TokSuccess{Success?}
+    TokSuccess -->|Yes| TokCredit[(Credit Tokens)]
+    TokSuccess -->|No| BuyToken
+    TokCredit --> TokConfirm[Confirmation Email]
+    
+    %% Service Posting Flow
+    TokenCheck -->|Has Tokens| PostService[Create Service]
+    TokConfirm --> PostService
+    PostService --> SvcTitle[Enter Title & Description]
+    SvcTitle --> SvcMedia[Upload Photos/Videos]
+    SvcMedia --> SvcCategory[Select Category]
+    SvcCategory --> SvcPrice[Set Base Price]
+    SvcPrice --> SvcPricing[Choose Pricing Type]
+    SvcPricing --> SvcArea[Define Service Area]
+    SvcArea --> SvcSchedule[Set Availability]
+    SvcSchedule --> SvcReview[Review Service]
+    SvcReview --> DeductToken[Deduct 1 Token]
+    DeductToken --> PublishSvc[(Publish to Marketplace)]
+    PublishSvc --> IndexES[(Index in Elasticsearch)]
+    IndexES --> ServiceLive[Service Live]
+    
+    %% ============ CUSTOMER SIDE (RIGHT COLUMN) ============
+    
+    %% Search Flow
+    CustDash --> SearchBar[Search for Services]
+    ServiceLive -.Available for search.-> SearchBar
+    SearchBar --> EnterQuery[Enter Search Query]
+    EnterQuery --> ESQuery[(Elasticsearch Search)]
+    ESQuery --> ShowResults[Display Results]
+    ShowResults --> ApplyFilter{Apply Filters?}
+    ApplyFilter -->|Yes| Filters[Location/Price/Rating/Category]
+    ApplyFilter -->|No| SortRes[Sort Results]
+    Filters --> SortRes
+    SortRes --> ViewService[Click on Service]
+    ViewService --> ServicePage[Service Details Page]
+    
+    %% Booking Flow
+    ServicePage --> BookNow[Book Now Button]
+    BookNow --> SelectTime[Select Date & Time]
+    SelectTime --> CheckSlot[(Check Availability)]
+    CheckSlot --> SlotAvail{Available?}
+    SlotAvail -->|No| AltTimes[Show Alternative Times]
+    AltTimes --> SelectTime
+    SlotAvail -->|Yes| ReserveSlot[Reserve for 10 mins]
+    ReserveSlot --> BookingInfo[Enter Location & Requests]
+    BookingInfo --> PriceCalc[Calculate Total<br/>Base: 1000 KES<br/>Platform Fee 15%: 150 KES<br/>Total: 1150 KES]
+    PriceCalc --> ConfirmBook{Confirm Booking?}
+    ConfirmBook -->|No| SearchBar
+    
+    %% Payment Flow
+    ConfirmBook -->|Yes| PaySelect{Select Payment}
+    PaySelect -->|Card| PayStripe[Stripe]
+    PaySelect -->|M-Pesa| PayMpesa[M-Pesa]
+    PaySelect -->|PayPal| PayPP[PayPal]
+    PayStripe & PayMpesa & PayPP --> PayProcess[Process Payment]
+    PayProcess --> PayResult{Payment Status}
+    PayResult -->|Failed| PayError[Show Error]
+    PayError --> PaySelect
+    PayResult -->|Success| CapturePayment[Capture 1150 KES]
+    
+    %% ============ MONEY FLOW (CENTER) ============
+    
+    CapturePayment --> PlatformAcc[(Platform Main Account<br/>Receives 1150 KES)]
+    PlatformAcc --> SplitMoney[Split Money]
+    SplitMoney --> ProviderPending[(Provider Pending<br/>850 KES - 85%)]
+    SplitMoney --> PlatformFee[(Platform Revenue<br/>300 KES - 15%)]
+    
+    %% Escrow Creation
+    ProviderPending --> CreateEscrow[(Create Escrow Record<br/>Amount: 850 KES<br/>Status: HELD<br/>Auto-release: +7 days)]
+    CreateEscrow --> RecordTxn[(Record Transaction)]
+    RecordTxn --> EmailCustomer[Email Receipt to Customer]
+    EmailCustomer --> NotifyProvider[Notify Provider<br/>Push/Email/SMS/In-app]
+    
+    %% ============ PROVIDER RESPONSE (LEFT SIDE) ============
+    
+    NotifyProvider --> ProviderWait[Provider Has 24h to Respond]
+    ProviderWait --> ProvResponse{Provider Response}
+    
+    %% Accept Path
+    ProvResponse -->|Accept| AcceptBooking[Accept Booking]
+    AcceptBooking --> LockTime[Lock Time Slot]
+    LockTime --> ConfirmStatus[(Status: CONFIRMED)]
+    ConfirmStatus --> NotifyCustomer[Notify Customer]
+    NotifyCustomer --> Calendars[Add to Both Calendars]
+    Calendars --> Reminders[Schedule Reminders<br/>24h & 1h before]
+    
+    %% Decline Path
+    ProvResponse -->|Decline| DeclineReason[Select Decline Reason]
+    DeclineReason --> ReleaseEscrow1[Release Escrow]
+    ReleaseEscrow1 --> RefundCustomer1[Process Refund to Customer]
+    RefundCustomer1 --> NotifyDecline[Notify Customer]
+    NotifyDecline --> SuggestOthers[Suggest Alternative Providers]
+    SuggestOthers --> SearchBar
+    
+    %% Timeout Path
+    ProvResponse -->|No Response 24h| AutoDecline[System Auto-declines]
+    AutoDecline --> AutoRefund[Automatic Refund]
+    AutoRefund --> PenalizeProvider[Impact Provider Rating]
+    PenalizeProvider --> NotifyTimeout[Notify Customer of Timeout]
+    NotifyTimeout --> SearchBar
+    
+    %% ============ SERVICE DELIVERY (CENTER) ============
+    
+    Reminders --> ServiceDay[Service Day Arrives]
+    ServiceDay --> StartService{Provider Marks}
+    StartService -->|Started| InProgress[(Status: IN PROGRESS)]
+    InProgress --> Messaging[Enable In-app Messaging]
+    Messaging --> ServiceOngoing[Service Being Delivered]
+    ServiceOngoing --> CompleteService[Provider Marks Complete]
+    StartService -->|Complete| CompleteService
+    CompleteService --> CompletedStatus[(Status: COMPLETED)]
+    CompletedStatus --> NotifyCompletion[Notify Customer for Confirmation]
+    
+    %% ============ COMPLETION VERIFICATION (RIGHT SIDE) ============
+    
+    NotifyCompletion --> CustomerAction{Customer Action}
+    
+    %% Confirm Path
+    CustomerAction -->|Confirm Complete| ConfirmComplete[Customer Confirms]
+    ConfirmComplete --> TriggerRelease[Trigger Escrow Release]
+    
+    %% Dispute Path
+    CustomerAction -->|Open Dispute| StartDispute[Open Dispute]
+    
+    %% Auto-confirm Path
+    CustomerAction -->|No Action 7 Days| AutoComplete[System Auto-confirms]
+    AutoComplete --> TriggerRelease
+    
+    %% ============ ESCROW RELEASE (CENTER RIGHT) ============
+    
+    TriggerRelease --> ReleaseEscrow[(Escrow Status: RELEASED)]
+    ReleaseEscrow --> MoveBalance[Move to Provider Available Balance]
+    MoveBalance --> UpdateBalance[(Provider Balance +850 KES)]
+    UpdateBalance --> NotifyPayment[Notify Provider: Payment Received]
+    NotifyPayment --> RecordRelease[(Record Transaction)]
+    RecordRelease --> ReviewPrompt[Prompt Both for Reviews]
+    
+    %% ============ REVIEW SYSTEM (FAR RIGHT) ============
+    
+    ReviewPrompt --> CustomerReview{Customer Leaves Review?}
+    CustomerReview -->|Yes| RateProvider[Rate 1-5 Stars]
+    RateProvider --> ReviewCategories[Select Categories<br/>Quality/Communication/Punctuality]
+    ReviewCategories --> WriteReview[Write Text Review]
+    WriteReview --> SubmitReview[Submit Review]
+    SubmitReview --> AICheck{AI Moderation}
+    AICheck -->|Pass| PublishReview[Publish Immediately]
+    AICheck -->|Flagged| ManualReview[Manual Review Queue]
+    ManualReview --> AdminCheck{Admin Decision}
+    AdminCheck -->|Approve| PublishReview
+    AdminCheck -->|Reject| RejectReview[Reject Review]
+    PublishReview --> UpdateProfile[(Add to Provider Profile)]
+    UpdateProfile --> RecalcRating[Recalculate Average Rating]
+    RecalcRating --> UpdateStats[(Update Provider Stats)]
+    UpdateStats --> BadgeCheck{Eligible for Badges?}
+    BadgeCheck -->|Yes| AwardBadges[Award Badges<br/>Top Rated/Quick Response]
+    BadgeCheck -->|No| ReviewDone[Review Complete]
+    AwardBadges --> ReviewDone
+    
+    CustomerReview -->|No| ProviderReviewOpt{Provider Reviews Customer?}
+    ProviderReviewOpt -->|Yes| ReviewCustomer[Rate Customer Reliability]
+    ReviewCustomer --> CustomerRep[(Build Customer Reputation Score)]
+    ProviderReviewOpt -->|No| ReviewDone
+    
+    %% ============ WITHDRAWAL FLOW (FAR LEFT) ============
+    
+    ReviewDone --> ProviderEarnings[Provider Views Earnings]
+    ProviderEarnings --> ViewBalances[Available Balance: 5200 KES<br/>Pending Balance: 1500 KES<br/>Transaction History]
+    ViewBalances --> WithdrawDecision{Initiate Withdrawal?}
+    WithdrawDecision -->|No| ProvDash
+    
+    WithdrawDecision -->|Yes| EnterAmount[Enter Withdrawal Amount]
+    EnterAmount --> ValidateAmount{Valid Amount?}
+    ValidateAmount -->|No| AmountError[Error: Min 1000 KES<br/>Max: Available Balance]
+    AmountError --> EnterAmount
+    
+    ValidateAmount -->|Yes| SelectMethod{Select Withdrawal Method}
+    SelectMethod -->|M-Pesa| MpesaWithdraw[M-Pesa<br/>Fee: 50 KES]
+    SelectMethod -->|Bank| BankWithdraw[Bank Transfer<br/>Fee: 100 KES]
+    SelectMethod -->|PayPal| PayPalWithdraw[PayPal<br/>Fee: 2% + 50 KES]
+    
+    MpesaWithdraw & BankWithdraw & PayPalWithdraw --> EnterPaymentDetails[Enter Payment Details]
+    EnterPaymentDetails --> VerifyDetails[(Verify Details)]
+    VerifyDetails --> CalculateFees[Calculate Net Amount<br/>Amount: 5000 KES<br/>Fee: 50 KES<br/>Net: 4950 KES]
+    CalculateFees --> ConfirmWithdraw{Confirm Withdrawal?}
+    ConfirmWithdraw -->|No| ViewBalances
+    
+    ConfirmWithdraw -->|Yes| CreateWithdrawal[(Create Withdrawal Request<br/>Status: PROCESSING)]
+    CreateWithdrawal --> CallGateway[Call Payment Gateway API]
+    CallGateway --> ExecuteTransfer[Execute Transfer]
+    ExecuteTransfer --> TransferResult{Transfer Result}
+    
+    TransferResult -->|Success| WithdrawSuccess[(Status: COMPLETED)]
+    WithdrawSuccess --> DeductFromBalance[(Deduct 5000 KES from Balance)]
+    DeductFromBalance --> RecordFeeRevenue[(Record 50 KES Fee as Revenue)]
+    RecordFeeRevenue --> UpdateProviderDB[(Update Provider Balance DB)]
+    UpdateProviderDB --> SendWithdrawConfirm[Send Email & SMS Confirmation]
+    SendWithdrawConfirm --> ProviderReceives[Provider Receives Money in Account]
+    ProviderReceives --> ProvDash
+    
+    TransferResult -->|Failed| WithdrawFailed[(Status: FAILED)]
+    WithdrawFailed --> NotifyFailure[Notify Provider with Error Reason]
+    NotifyFailure --> RetryWithdraw[Provide Retry Option]
+    RetryWithdraw --> SelectMethod
+    
+    %% ============ DISPUTE RESOLUTION (BOTTOM CENTER) ============
+    
+    StartDispute --> SelectDisputeType[Select Dispute Type<br/>Service Not Delivered<br/>Quality Issues<br/>Wrong Charges<br/>Behavior Issues]
+    SelectDisputeType --> DisputeDescription[Write Detailed Description]
+    DisputeDescription --> UploadEvidence[Upload Evidence<br/>Photos/Screenshots/Messages]
+    UploadEvidence --> SubmitDispute[Submit Dispute]
+    
+    SubmitDispute --> CreateDispute[(Create Dispute Record<br/>Assign Unique Number)]
+    CreateDispute --> FreezeEscrow[(Escrow Status: FROZEN<br/>Disable Auto-release)]
+    FreezeEscrow --> NotifyProviderDispute[Notify Provider Immediately]
+    
+    NotifyProviderDispute --> Provider48h[Provider Has 48h to Respond]
+    Provider48h --> ViewComplaint[View Customer Complaint & Evidence]
+    ViewComplaint --> ProviderEvidence[Upload Counter-evidence & Explanation]
+    ProviderEvidence --> SubmitResponse[Submit Response]
+    
+    SubmitResponse --> AdminQueue[(Dispute Enters Admin Review Queue)]
+    AdminQueue --> AssignAdmin[Admin Assigned to Case]
+    AssignAdmin --> ReviewAllEvidence[Review All Evidence<br/>Customer Evidence<br/>Provider Evidence<br/>Booking History<br/>Chat Logs<br/>User Ratings & History]
+    ReviewAllEvidence --> NeedMoreInfo{Need Additional Info?}
+    NeedMoreInfo -->|Yes| RequestAdditionalInfo[Request More Information]
+    RequestAdditionalInfo --> ReviewAllEvidence
+    
+    NeedMoreInfo -->|No| AdminDecision{Admin Makes Decision}
+    
+    %% Full Refund Path
+    AdminDecision -->|Full Refund to Customer| CustomerFavor[Decide in Customer Favor]
+    CustomerFavor --> ReleaseForRefund[(Release Escrow)]
+    ReleaseForRefund --> ProcessFullRefund[Process Full Refund<br/>850 KES + 300 KES = 1150 KES]
+    ProcessFullRefund --> RefundStatus[(Booking Status: REFUNDED)]
+    RefundStatus --> WarnProvider[Warn/Flag Provider]
+    WarnProvider --> NotifyBothRefund[Notify Both Parties]
+    NotifyBothRefund --> DisputeClosed[Close Dispute]
+    
+    %% Release to Provider Path
+    AdminDecision -->|Release to Provider| ProviderFavor[Decide in Provider Favor]
+    ProviderFavor --> ReleaseToProvider[(Release Escrow to Provider Balance)]
+    ReleaseToProvider --> MarkAsCompleted[(Mark Service as Completed)]
+    MarkAsCompleted --> NotifyBothRelease[Notify Both Parties]
+    NotifyBothRelease --> DisputeClosed
+    
+    %% Partial Settlement Path
+    AdminDecision -->|Partial Settlement| SplitDecision[Calculate Partial Split<br/>Example: 60% Customer, 40% Provider]
+    SplitDecision --> CustomerRefund[Customer Receives: 510 KES Refund]
+    SplitDecision --> ProviderReceivesPartial[Provider Receives: 340 KES]
+    CustomerRefund --> ProcessBothAmounts[Process Both Amounts]
+    ProviderReceivesPartial --> ProcessBothAmounts
+    ProcessBothAmounts --> NotifyBothPartial[Notify Both with Explanation]
+    NotifyBothPartial --> DisputeClosed
+    
+    DisputeClosed --> DisputeResolved[(Dispute Status: RESOLVED<br/>Record Resolution Details)]
+    DisputeResolved --> AffectReliability[Affect Both Users Reliability Scores]
+    AffectReliability --> CaseClosed[Case Closed]
+    
+    %% ============ REFUND PROCESSING DETAIL (BOTTOM RIGHT) ============
+    
+    ProcessFullRefund --> IdentifyOriginalMethod[(Identify Original Payment Method)]
+    IdentifyOriginalMethod --> RefundGateway{Refund via Gateway}
+    RefundGateway -->|Stripe| RefundStripe[Refund to Card<br/>3-5 business days]
+    RefundGateway -->|M-Pesa| RefundMpesa[Refund to Phone<br/>Instant]
+    RefundGateway -->|PayPal| RefundPayPal[Refund to PayPal<br/>Instant]
+    
+    RefundStripe & RefundMpesa & RefundPayPal --> RecordRefund[(Record Refund Transaction)]
+    RecordRefund --> UpdateBookingDB[(Update Booking Status)]
+    UpdateBookingDB --> UpdateEscrowDB[(Update Escrow Status)]
+    UpdateEscrowDB --> CancelBooking[Cancel Booking]
+    CancelBooking --> EmailReceiptRefund[Email Receipt to Customer]
+    EmailReceiptRefund --> TransactionHistory[Show in Transaction History]
+    
+    %% ============ FINANCIAL MANAGEMENT (BOTTOM LEFT) ============
+    
+    TransactionHistory --> DailyReconciliation[Daily Reconciliation Process<br/>Runs at Midnight]
+    DailyReconciliation --> MatchAllTransactions[Match All Transactions<br/>Payments Received from Customers<br/>Payments Released to Providers<br/>Refunds Issued<br/>Withdrawals Processed]
+    MatchAllTransactions --> CheckDiscrepancies{Check for Discrepancies}
+    CheckDiscrepancies -->|Found Issues| FlagForAdmin[Flag for Admin Review]
+    CheckDiscrepancies -->|All Match| GenerateFinancialReport[Generate Daily Financial Report]
+    
+    GenerateFinancialReport --> ReportIncludes[Report Includes:<br/>Total Revenue Collected<br/>Platform Fees Earned<br/>Withdrawal Fees Earned<br/>Token Sales Revenue<br/>Pending Provider Balances<br/>Money in Platform Account<br/>Net Platform Profit]
+    
+    %% ============ REVENUE STREAMS (BOTTOM FAR LEFT) ============
+    
+    ReportIncludes --> RevenueTracking[REVENUE STREAMS TRACKING]
+    RevenueTracking --> Stream1[Stream 1: Booking Fees 15%<br/>Example: 150 KES per 1000 KES service<br/>Recorded in platform_revenue table]
+    RevenueTracking --> Stream2[Stream 2: Withdrawal Fees<br/>M-Pesa: 50 KES<br/>Bank: 100 KES<br/>PayPal: 2% + 50 KES<br/>Recorded when processed]
+    RevenueTracking --> Stream3[Stream 3: Token Sales<br/>Example: 500 KES for 5 tokens<br/>100% revenue, no cost]
+    
+    Stream1 & Stream2 & Stream3 --> TotalRevenue[Calculate Total Platform Revenue]
+    TotalRevenue --> DailyRevenue[Daily: Sum all three streams]
+    DailyRevenue --> MonthlyRevenue[Monthly: Aggregate for reports]
+    MonthlyRevenue --> YearlyRevenue[Yearly: Financial statements]
+    
+    %% ============ INFRASTRUCTURE LAYERS (LEFT SIDE BOTTOM) ============
+    
+    YearlyRevenue --> Infrastructure[INFRASTRUCTURE LAYERS]
+    
+    Infrastructure --> Layer1[Layer 1: USER ACCESS<br/>Customer: Web/Mobile App<br/>Provider: Web/Mobile App<br/>Admin: Admin Panel<br/>All traffic via HTTPS]
+    
+    Layer1 --> Layer2[Layer 2: DNS & CDN<br/>CloudFlare DNS resolves domain<br/>CloudFlare CDN serves static assets<br/>DDoS protection active<br/>SSL/TLS certificate managed]
+    
+    Layer2 --> Layer3[Layer 3: LOAD BALANCER<br/>NGINX receives all requests<br/>Distributes traffic across API servers<br/>Least-connection algorithm<br/>Health checks every 10 seconds<br/>SSL termination<br/>Rate limiting per IP]
+    
+    Layer3 --> Layer4[Layer 4: API SERVERS<br/>Multiple NestJS instances<br/>Docker containers<br/>Kubernetes pods<br/>Auto-scaling: Min 3, Max 20 pods<br/>Scale: CPU > 70% or Memory > 80%<br/>Handle auth, business logic, DB queries]
+    
+    Layer4 --> Layer5[Layer 5: WEBSOCKET SERVERS<br/>Separate server instances<br/>Socket.io connections<br/>Real-time notifications<br/>Live booking updates<br/>In-app messaging<br/>Separate scaling from API]
+    
+    Layer5 --> Layer6[Layer 6: BACKGROUND WORKERS<br/>Separate worker instances<br/>Email sending, SMS sending<br/>Escrow auto-release<br/>Daily reports<br/>Bull queue system Redis-backed<br/>Job retry logic on failure<br/>Dead letter queue]
+    
+    Layer6 --> Layer7[Layer 7: DATABASES]
+    
+    Layer7 --> PostgreSQL[(PostgreSQL PRIMARY DATABASE<br/>Stores: Users, Services, Bookings<br/>Transactions, Escrow<br/>Multi-AZ deployment<br/>1 Primary write, 2 Replicas read<br/>Auto-failover < 30 seconds<br/>Connection pooling max 500<br/>Daily automated backups 7 days<br/>Point-in-time recovery)]
+    
+    Layer7 --> Redis[(Redis CACHE & QUEUE<br/>Session storage<br/>Rate limiting counters<br/>Real-time availability data<br/>Job queues<br/>Query result caching<br/>Redis Sentinel HA<br/>1 master, 2 replicas)]
+    
+    Layer7 --> Elasticsearch[(Elasticsearch SEARCH ENGINE<br/>Full-text search for services<br/>Geospatial queries<br/>Faceted filtering<br/>3-node cluster for redundancy<br/>Automatic index replication)]
+    
+    Layer7 --> MongoDB[(MongoDB LOGS & ANALYTICS<br/>Application logs<br/>Audit trails<br/>User behavior analytics<br/>Time-series data<br/>Replica set 3 nodes)]
+    
+    %% ============ SECURITY MEASURES (CENTER BOTTOM) ============
+    
+    PostgreSQL & Redis & Elasticsearch & MongoDB --> Security[SECURITY MEASURES]
+    
+    Security --> AppSecurity[Application Security<br/>JWT tokens for auth<br/>15min access, 7day refresh<br/>Password hashing bcrypt cost 12<br/>Input validation all endpoints<br/>SQL injection prevention<br/>XSS prevention, CSP headers<br/>CSRF protection]
+    
+    Security --> NetworkSecurity[Network Security<br/>Web Application Firewall<br/>CloudFlare WAF<br/>DDoS protection CloudFlare<br/>Rate limiting per IP and user<br/>Geo-blocking suspicious countries]
+    
+    Security --> DataSecurity[Data Security<br/>Encryption at rest database level<br/>Encryption in transit TLS 1.3<br/>PII data encrypted AES-256<br/>Payment data tokenized never stored<br/>Audit logging financial transactions<br/>Regular security scans]
+    
+    Security --> InfraSecurity[Infrastructure Security<br/>Private network for database access<br/>No direct public access to databases<br/>API keys in environment variables<br/>Secrets managed HashiCorp Vault<br/>SSH access restricted to authorized IPs<br/>Multi-factor authentication admin access]
+    
+    %% ============ MONITORING & OBSERVABILITY (RIGHT SIDE BOTTOM) ============
+    
+    AppSecurity & NetworkSecurity & DataSecurity & InfraSecurity --> Monitoring[MONITORING & OBSERVABILITY]
+    
+    Monitoring --> HealthMonitoring[Health Monitoring<br/>Health check endpoint each service<br/>NGINX pings every 10 seconds<br/>Unhealthy services removed from LB<br/>Auto pod restart if 3 fails]
+    
+    Monitoring --> PerformanceMonitoring[Performance Monitoring<br/>Prometheus collects metrics every 15s<br/>API response times<br/>Database query times<br/>Error rates<br/>Request throughput<br/>CPU/Memory usage per service<br/>Grafana dashboards real-time<br/>Alerts if thresholds exceeded]
+    
+    Monitoring --> ErrorTracking[Error Tracking<br/>Sentry captures all app errors<br/>Errors grouped by type and frequency<br/>Stack traces collected<br/>User context included<br/>Email alerts for critical errors<br/>Slack notifications production errors]
+    
+    Monitoring --> LogAggregation[Log Aggregation<br/>All app logs sent to ELK stack<br/>Elasticsearch stores logs<br/>Kibana provides search interface<br/>Logs retained for 30 days<br/>Critical logs backed up]
+    
+    Monitoring --> UptimeMonitoring[Uptime Monitoring<br/>UptimeRobot pings every 5 minutes<br/>Alerts if site down > 1 minute<br/>SMS and email alerts to DevOps team<br/>Status page for customers]
+    
+    Monitoring --> RealTimeAlerts[Real-time Alerts<br/>PagerDuty integration<br/>Escalation policy<br/>Engineer → Team Lead → CTO<br/>On-call rotation schedule<br/>Incident response runbooks]
+    
+    %% ============ SCALABILITY ARCHITECTURE (FAR BOTTOM RIGHT) ============
+    
+    HealthMonitoring & PerformanceMonitoring & ErrorTracking & LogAggregation & UptimeMonitoring & RealTimeAlerts --> Scalability[SCALABILITY ARCHITECTURE]
+    
+    Scalability --> HorizontalScaling[Horizontal Scaling<br/>API servers scale 3 to 20 pods auto<br/>Worker servers scale 2 to 10 pods<br/>Triggers: CPU > 70%, Memory > 80%<br/>Queue depth > 1000<br/>New pods spawn < 2 minutes<br/>Traffic distributed evenly by LB]
+    
+    Scalability --> VerticalScaling[Vertical Scaling<br/>Database can scale up more CPU/RAM<br/>Redis can scale up<br/>Scheduled downtime for vertical scaling<br/>Monthly maintenance window]
+    
+    Scalability --> GeographicScaling[Geographic Scaling<br/>Future: Multiple regions<br/>Kenya, Nigeria, South Africa<br/>CloudFlare serves from nearest edge<br/>Database read replicas in each region<br/>Writes go to primary region<br/>Reads from local replica]
+    
+    Scalability --> DatabaseScaling[Database Scaling<br/>Read replicas handle read-heavy queries<br/>Searches, analytics<br/>Write queries go to primary<br/>Connection pooling prevents exhaustion<br/>Query optimization with proper indexes<br/>Table partitioning for large tables<br/>Bookings partitioned by month]
+    
+    %% ============ HIGH AVAILABILITY STRATEGY (FAR BOTTOM) ============
+    
+    HorizontalScaling & VerticalScaling & GeographicScaling & DatabaseScaling --> HighAvailability[HIGH AVAILABILITY STRATEGY]
+    
+    HighAvailability --> ZeroDowntime[Zero Downtime Deployments<br/>Rolling updates in Kubernetes<br/>Update 1 pod at a time<br/>Wait for health check before next<br/>Rollback auto if health checks fail<br/>Blue-green deployment option<br/>For major releases]
+    
+    HighAvailability --> FailoverMechanisms[Failover Mechanisms<br/>Database: Auto-failover to replica < 30s<br/>Redis: Sentinel promotes replica to master<br/>Load balancer: Removes failed servers immediately<br/>DNS: CloudFlare fails over to backup IP]
+    
+    HighAvailability --> BackupStrategy[Backup Strategy<br/>Database: Daily automated backups 7 days<br/>Files uploads: Daily S3 backups 30 days<br/>Configuration: Version controlled in Git<br/>Disaster recovery plan<br/>Restore from backup < 1 hour]
+    
+    HighAvailability --> DisasterRecovery[Disaster Recovery<br/>Regular disaster recovery drills quarterly<br/>Documented recovery procedures<br/>Backup data center option future<br/>RTO Recovery Time Objective: 1 hour<br/>RPO Recovery Point Objective: 24 hours]
+    
+    %% ============ COMPLETE SYSTEM (END NODE) ============
+    
+    ZeroDowntime & FailoverMechanisms & BackupStrategy & DisasterRecovery --> Complete([JIRANI PLATFORM<br/>COMPLETE SYSTEM<br/>END-TO-END FLOW])
+    
+    %% Styling
+    classDef default fill:#fff,stroke:#000,stroke-width:2px,color:#000
+    classDef decision fill:#fff,stroke:#000,stroke-width:2px,color:#000
+    classDef database fill:#fff,stroke:#000,stroke-width:2px,color:#000
+    classDef process fill:#fff,stroke:#000,stroke-width:2px,color:#000
+    classDef endpoint fill:#fff,stroke:#000,stroke-width:3px,color:#000
+    
+    class Start,Complete endpoint
+    class Role,TokenCheck,TokSuccess,SlotAvail,ConfirmBook,PaySelect,PayResult,ProvResponse,StartService,CustomerAction,CustomerReview,AICheck,AdminCheck,BadgeCheck,ProviderReviewOpt,WithdrawDecision,ValidateAmount,SelectMethod,ConfirmWithdraw,TransferResult,NeedMoreInfo,AdminDecision,RefundGateway,CheckDiscrepancies,ApplyFilter decision
+    class TokCredit,PublishSvc,IndexES,ESQuery,CheckSlot,PlatformAcc,ProviderPending,PlatformFee,CreateEscrow,RecordTxn,ConfirmStatus,InProgress,CompletedStatus,ReleaseEscrow,UpdateBalance,RecordRelease,UpdateProfile,UpdateStats,CustomerRep,VerifyDetails,CreateWithdrawal,DeductFromBalance,RecordFeeRevenue,UpdateProviderDB,WithdrawSuccess,WithdrawFailed,CreateDispute,FreezeEscrow,AdminQueue,ReleaseForRefund,RefundStatus,ReleaseToProvider,MarkAsCompleted,DisputeResolved,IdentifyOriginalMethod,RecordRefund,UpdateBookingDB,UpdateEscrowDB,PostgreSQL,Redis,Elasticsearch,MongoDB database
